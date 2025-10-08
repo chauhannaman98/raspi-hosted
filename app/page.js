@@ -50,7 +50,7 @@ export default function Home() {
             Read our docs
           </a>
         </div>
-        This is a test deployment hosted from locally hosted server (RasPi3B) by Naman Chauhan.
+        This is a test deployment hosted from locally hosted server (RasPi3B) by Naman Chauhan with ☕.
       </main>
       <footer className="row-start-3 flex gap-[24px] flex-wrap items-center justify-center">
         <a
