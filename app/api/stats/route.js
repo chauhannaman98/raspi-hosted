@@ -4,6 +4,22 @@ import { promisify } from 'util';
 
 const execPromise = promisify(exec);
 
+// Runs a command and, on failure, captures the *actual* stderr/error text
+// instead of discarding it. vcgencmd in particular can fail for several
+// different reasons (not installed, not on a Pi, permission denied because
+// the process user isn't in the `video` group, etc.) and silently returning
+// null makes those indistinguishable from the dashboard. Callers get the
+// real reason back in an `error` field so it can be surfaced in the UI.
+async function safeExec(cmd) {
+  try {
+    const { stdout } = await execPromise(cmd);
+    return { stdout, error: null };
+  } catch (error) {
+    const message = (error.stderr || error.message || 'Unknown error').toString().trim();
+    return { stdout: null, error: message };
+  }
+}
+
 async function getCPUTemperature() {
   try {
     const { stdout } = await execPromise('cat /sys/class/thermal/thermal_zone0/temp');
@@ -16,13 +32,15 @@ async function getCPUTemperature() {
 // Parses the bitmask returned by `vcgencmd get_throttled` into human-readable flags.
 // Bit reference: https://www.raspberrypi.com/documentation/computers/os.html#get_throttled
 async function getThrottledStatus() {
-  try {
-    const { stdout } = await execPromise('vcgencmd get_throttled');
-    const match = stdout.match(/0x([0-9a-fA-F]+)/);
-    if (!match) return null;
+  const { stdout, error } = await safeExec('vcgencmd get_throttled');
+  if (error) return { data: null, error };
 
-    const value = parseInt(match[1], 16);
-    return {
+  const match = stdout.match(/0x([0-9a-fA-F]+)/);
+  if (!match) return { data: null, error: `Unexpected vcgencmd output: "${stdout.trim()}"` };
+
+  const value = parseInt(match[1], 16);
+  return {
+    data: {
       raw: `0x${match[1]}`,
       undervoltageNow: !!(value & 0x1),
       freqCappedNow: !!(value & 0x2),
@@ -32,40 +50,39 @@ async function getThrottledStatus() {
       freqCappedOccurred: !!(value & 0x20000),
       throttledOccurred: !!(value & 0x40000),
       tempLimitOccurred: !!(value & 0x80000)
-    };
-  } catch (error) {
-    // vcgencmd is only available on Raspberry Pi OS
-    return null;
-  }
+    },
+    error: null
+  };
 }
 
 async function getCoreVoltage() {
-  try {
-    const { stdout } = await execPromise('vcgencmd measure_volts core');
-    const match = stdout.match(/volt=([\d.]+)V/);
-    return match ? parseFloat(match[1]) : null;
-  } catch (error) {
-    return null;
-  }
+  const { stdout, error } = await safeExec('vcgencmd measure_volts core');
+  if (error) return { data: null, error };
+
+  const match = stdout.match(/volt=([\d.]+)V/);
+  if (!match) return { data: null, error: `Unexpected vcgencmd output: "${stdout.trim()}"` };
+
+  return { data: parseFloat(match[1]), error: null };
 }
 
 async function getClockSpeeds() {
-  try {
-    const [armResult, gpuResult] = await Promise.all([
-      execPromise('vcgencmd measure_clock arm'),
-      execPromise('vcgencmd measure_clock core')
-    ]);
-    const parseHz = (stdout) => {
-      const match = stdout.match(/=(\d+)/);
-      return match ? Math.round(parseInt(match[1], 10) / 1e6) : null;
-    };
-    return {
-      armMHz: parseHz(armResult.stdout),
-      gpuMHz: parseHz(gpuResult.stdout)
-    };
-  } catch (error) {
-    return { armMHz: null, gpuMHz: null };
-  }
+  const [armResult, gpuResult] = await Promise.all([
+    safeExec('vcgencmd measure_clock arm'),
+    safeExec('vcgencmd measure_clock core')
+  ]);
+
+  const parseHz = (stdout) => {
+    const match = stdout.match(/=(\d+)/);
+    return match ? Math.round(parseInt(match[1], 10) / 1e6) : null;
+  };
+
+  return {
+    data: {
+      armMHz: armResult.error ? null : parseHz(armResult.stdout),
+      gpuMHz: gpuResult.error ? null : parseHz(gpuResult.stdout)
+    },
+    error: armResult.error || gpuResult.error || null
+  };
 }
 
 // Checks the status of a systemd-managed service (e.g. cloudflared, webhook).
@@ -199,9 +216,9 @@ export async function GET() {
     const [
       cpuTemp,
       diskUsage,
-      throttled,
-      coreVoltage,
-      clockSpeeds,
+      throttledResult,
+      coreVoltageResult,
+      clockSpeedsResult,
       pm2Processes,
       cloudflaredStatus,
       webhookStatus,
@@ -230,9 +247,17 @@ export async function GET() {
       disk: diskUsage,
       network,
       health: {
-        throttled,
-        coreVoltage,
-        clockSpeeds
+        throttled: throttledResult.data,
+        coreVoltage: coreVoltageResult.data,
+        clockSpeeds: clockSpeedsResult.data,
+        // Real error text (e.g. "vcgencmd: command not found" vs a
+        // permission error) so the dashboard can tell you *why* a value is
+        // missing instead of just showing N/A.
+        diagnostics: {
+          throttledError: throttledResult.error,
+          coreVoltageError: coreVoltageResult.error,
+          clockSpeedsError: clockSpeedsResult.error
+        }
       },
       services: {
         systemd: [

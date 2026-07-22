@@ -28,8 +28,8 @@ function ThroughputChart({ data }) {
   }
 
   return (
-    <div className="h-48">
-      <ResponsiveContainer width="100%" height="100%">
+    <div className="h-48 w-full">
+      <ResponsiveContainer width="100%" height="100%" minWidth={200} minHeight={150} debounce={50}>
         <LineChart data={data} margin={{ top: 5, right: 10, left: -10, bottom: 0 }}>
           <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
           <XAxis dataKey="time" tick={{ fontSize: 11 }} minTickGap={30} />
