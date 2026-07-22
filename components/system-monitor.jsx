@@ -1,15 +1,50 @@
 'use client';
 
-import { useState, useEffect } from 'react';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { SimpleProgress } from '@/components/simple-progress';
+import { useState, useEffect, useRef } from 'react';
 import { Badge } from '@/components/ui/badge';
-import { Cpu, HardDrive, MemoryStick, Thermometer, Server, Clock, Activity } from 'lucide-react';
+import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Activity, Clock } from 'lucide-react';
+import OverviewTab from '@/components/stats/overview-tab';
+import HealthTab from '@/components/stats/health-tab';
+import TrendsTab from '@/components/stats/trends-tab';
+import ServicesTab from '@/components/stats/services-tab';
+import NetworkTab from '@/components/stats/network-tab';
+
+const HISTORY_LIMIT = 40; // ~80s of history at a 2s poll interval
+
+// Computes bytes/sec for each interface by diffing against the previous poll's
+// cumulative counters. Counters reset to 0 on interface restart/reboot, so a
+// negative delta is treated as "no data yet" rather than a huge negative rate.
+function computeInterfaceRates(currentInterfaces, prevSnapshot, nowMs) {
+  if (!prevSnapshot) return currentInterfaces.map((iface) => ({ ...iface, rxRate: null, txRate: null }));
+
+  const dtSeconds = (nowMs - prevSnapshot.timestamp) / 1000;
+  if (dtSeconds <= 0) return currentInterfaces.map((iface) => ({ ...iface, rxRate: null, txRate: null }));
+
+  return currentInterfaces.map((iface) => {
+    const prev = prevSnapshot.interfaces[iface.name];
+    if (!prev) return { ...iface, rxRate: null, txRate: null };
+
+    const rxDelta = iface.rxBytes - prev.rxBytes;
+    const txDelta = iface.txBytes - prev.txBytes;
+
+    return {
+      ...iface,
+      rxRate: rxDelta >= 0 ? rxDelta / dtSeconds : null,
+      txRate: txDelta >= 0 ? txDelta / dtSeconds : null
+    };
+  });
+}
 
 export default function SystemMonitor() {
   const [stats, setStats] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [history, setHistory] = useState([]);
+  const [networkHistory, setNetworkHistory] = useState([]);
+  const [networkInterfaces, setNetworkInterfaces] = useState([]);
+  const prevNetworkRef = useRef(null);
 
   useEffect(() => {
     const fetchStats = async () => {
@@ -19,6 +54,52 @@ export default function SystemMonitor() {
         const data = await response.json();
         setStats(data);
         setError(null);
+
+        const cpuAvg =
+          data.cpu.cores.reduce((sum, core) => sum + core.usage, 0) / data.cpu.cores.length;
+
+        const timeLabel = new Date(data.timestamp).toLocaleTimeString([], { hour12: false });
+
+        setHistory((prev) => {
+          const next = [
+            ...prev,
+            {
+              time: timeLabel,
+              cpuAvg: Number(cpuAvg.toFixed(1)),
+              temp: parseFloat(data.cpu.temperature) || null,
+              mem: data.memory.usagePercent
+            }
+          ];
+          return next.length > HISTORY_LIMIT ? next.slice(next.length - HISTORY_LIMIT) : next;
+        });
+
+        // Network throughput is derived client-side by diffing cumulative
+        // counters against the previous poll (the API only reports totals).
+        const rawInterfaces = data.network || [];
+        const nowMs = Date.now();
+        const withRates = computeInterfaceRates(rawInterfaces, prevNetworkRef.current, nowMs);
+        setNetworkInterfaces(withRates);
+
+        prevNetworkRef.current = {
+          timestamp: nowMs,
+          interfaces: Object.fromEntries(
+            rawInterfaces.map((iface) => [iface.name, { rxBytes: iface.rxBytes, txBytes: iface.txBytes }])
+          )
+        };
+
+        const hasRates = withRates.some((iface) => iface.rxRate != null || iface.txRate != null);
+        if (hasRates) {
+          const totalRx = withRates.reduce((sum, iface) => sum + (iface.rxRate || 0), 0);
+          const totalTx = withRates.reduce((sum, iface) => sum + (iface.txRate || 0), 0);
+
+          setNetworkHistory((prev) => {
+            const next = [
+              ...prev,
+              { time: timeLabel, rx: Number(totalRx.toFixed(0)), tx: Number(totalTx.toFixed(0)) }
+            ];
+            return next.length > HISTORY_LIMIT ? next.slice(next.length - HISTORY_LIMIT) : next;
+          });
+        }
       } catch (err) {
         setError(err.message);
       } finally {
@@ -31,27 +112,6 @@ export default function SystemMonitor() {
 
     return () => clearInterval(interval);
   }, []);
-
-  const formatUptime = (seconds) => {
-    const days = Math.floor(seconds / 86400);
-    const hours = Math.floor((seconds % 86400) / 3600);
-    const minutes = Math.floor((seconds % 3600) / 60);
-    return `${days}d ${hours}h ${minutes}m`;
-  };
-
-  const getStatusColor = (percentage) => {
-    if (percentage < 60) return 'bg-green-500';
-    if (percentage < 80) return 'bg-yellow-500';
-    return 'bg-red-500';
-  };
-
-  const getTempColor = (temp) => {
-    const tempNum = parseFloat(temp);
-    if (isNaN(tempNum)) return 'bg-gray-500';
-    if (tempNum < 60) return 'bg-green-500';
-    if (tempNum < 75) return 'bg-yellow-500';
-    return 'bg-red-500';
-  };
 
   if (loading) {
     return (
@@ -94,114 +154,35 @@ export default function SystemMonitor() {
         </Badge>
       </div>
 
-      <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">System Info</CardTitle>
-            <Server className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-2">
-              <div className="flex justify-between">
-                <span className="text-sm text-muted-foreground">Hostname:</span>
-                <span className="text-sm font-medium">{stats.system.hostname}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-sm text-muted-foreground">Platform:</span>
-                <span className="text-sm font-medium">{stats.system.platform}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-sm text-muted-foreground">Architecture:</span>
-                <span className="text-sm font-medium">{stats.system.arch}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-sm text-muted-foreground">Uptime:</span>
-                <span className="text-sm font-medium">{formatUptime(stats.system.uptime)}</span>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
+      <Tabs defaultValue="overview">
+        <TabsList>
+          <TabsTrigger value="overview">Overview</TabsTrigger>
+          <TabsTrigger value="health">Health</TabsTrigger>
+          <TabsTrigger value="trends">Trends</TabsTrigger>
+          <TabsTrigger value="network">Network</TabsTrigger>
+          <TabsTrigger value="services">Services</TabsTrigger>
+        </TabsList>
 
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">CPU Temperature</CardTitle>
-            <Thermometer className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-3xl font-bold">{stats.cpu.temperature}°C</div>
-            <div className="mt-4">
-              <div className={`h-2 rounded-full ${getTempColor(stats.cpu.temperature)}`}
-                   style={{ width: `${Math.min((parseFloat(stats.cpu.temperature) / 85) * 100, 100)}%` }} />
-            </div>
-            <p className="text-xs text-muted-foreground mt-2">
-              Load Avg: {stats.cpu.loadAverage.map(l => l.toFixed(2)).join(', ')}
-            </p>
-          </CardContent>
-        </Card>
+        <TabsContent value="overview">
+          <OverviewTab stats={stats} />
+        </TabsContent>
 
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Memory Usage</CardTitle>
-            <MemoryStick className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-3xl font-bold">{stats.memory.usagePercent}%</div>
-            <SimpleProgress value={Number(stats.memory.usagePercent)} className="mt-4" />
-            <p className="text-xs text-muted-foreground mt-2">
-              {stats.memory.used} GB / {stats.memory.total} GB used
-            </p>
-          </CardContent>
-        </Card>
-      </div>
+        <TabsContent value="health">
+          <HealthTab health={stats.health} />
+        </TabsContent>
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center">
-            <Cpu className="w-5 h-5 mr-2" />
-            CPU Cores
-          </CardTitle>
-          <CardDescription>Per-core CPU usage</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="grid gap-4 md:grid-cols-2">
-            {stats.cpu.cores.map((core) => (
-              <div key={core.core} className="space-y-2">
-                <div className="flex items-center justify-between">
-                  <span className="text-sm font-medium">Core {core.core}</span>
-                  <Badge variant={core.usage > 80 ? 'destructive' : 'secondary'}>
-                    {core.usage}%
-                  </Badge>
-                </div>
-                <SimpleProgress value={Number(core.usage)} />
-                <p className="text-xs text-muted-foreground truncate">{core.model}</p>
-              </div>
-            ))}
-          </div>
-        </CardContent>
-      </Card>
+        <TabsContent value="trends">
+          <TrendsTab history={history} />
+        </TabsContent>
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center">
-            <HardDrive className="w-5 h-5 mr-2" />
-            Disk Usage
-          </CardTitle>
-          <CardDescription>Root filesystem usage</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="space-y-4">
-            <div className="flex items-center justify-between">
-              <div className="space-y-1">
-                <p className="text-2xl font-bold">{stats.disk.percent}</p>
-                <p className="text-sm text-muted-foreground">
-                  {stats.disk.used} / {stats.disk.total}
-                </p>
-              </div>
-            </div>
-            <SimpleProgress value={Number(parseFloat(stats.disk.percent))} />
-          </div>
-        </CardContent>
-      </Card>
+        <TabsContent value="network">
+          <NetworkTab interfaces={networkInterfaces} history={networkHistory} />
+        </TabsContent>
+
+        <TabsContent value="services">
+          <ServicesTab services={stats.services} />
+        </TabsContent>
+      </Tabs>
     </div>
   );
 }
