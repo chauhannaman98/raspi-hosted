@@ -7,7 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Activity, Clock } from 'lucide-react';
 import OverviewTab from '@/components/stats/overview-tab';
 import HealthTab from '@/components/stats/health-tab';
-// import TrendsTab from '@/components/stats/trends-tab';
+import TrendsTab from '@/components/stats/trends-tab';
 import ServicesTab from '@/components/stats/services-tab';
 import NetworkTab from '@/components/stats/network-tab';
 
@@ -171,9 +171,9 @@ export default function SystemMonitor() {
           <HealthTab health={stats.health} />
         </TabsContent>
 
-        {/* <TabsContent value="trends">
+        <TabsContent value="trends">
           <TrendsTab history={history} />
-        </TabsContent> */}
+        </TabsContent>
 
         <TabsContent value="network">
           <NetworkTab interfaces={networkInterfaces} history={networkHistory} />
