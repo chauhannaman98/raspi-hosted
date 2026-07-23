@@ -158,7 +158,7 @@ export default function SystemMonitor() {
         <TabsList>
           <TabsTrigger value="overview">Overview</TabsTrigger>
           <TabsTrigger value="health">Health</TabsTrigger>
-          <TabsTrigger value="trends">Trends</TabsTrigger>
+          {/* <TabsTrigger value="trends">Trends</TabsTrigger> */}
           <TabsTrigger value="network">Network</TabsTrigger>
           <TabsTrigger value="services">Services</TabsTrigger>
         </TabsList>

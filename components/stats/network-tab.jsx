@@ -51,6 +51,7 @@ function ThroughputChart({ data }) {
 }
 
 export default function NetworkTab({ interfaces, history }) {
+  console.log(history);
   const hasInterfaces = interfaces && interfaces.length > 0;
 
   return (
