@@ -33,8 +33,16 @@ function FlagRow({ label, tripped }) {
 }
 
 export default function HealthTab({ health }) {
-  const { throttled, coreVoltage, clockSpeeds } = health || {};
+  const { throttled, coreVoltage, clockSpeeds, diagnostics } = health || {};
   const vcgencmdAvailable = !!throttled;
+
+  const errors = [diagnostics?.throttledError, diagnostics?.coreVoltageError, diagnostics?.clockSpeedsError].filter(
+    Boolean
+  );
+  // De-dupe, since the same underlying cause (e.g. permission denied) often
+  // shows up identically across all three vcgencmd calls.
+  const uniqueErrors = [...new Set(errors)];
+  const looksLikePermissionIssue = uniqueErrors.some((e) => /permission|denied|vchiq|vchi/i.test(e));
 
   const anyIssueNow =
     throttled &&
@@ -44,12 +52,25 @@ export default function HealthTab({ health }) {
     <div className="space-y-6">
       {!vcgencmdAvailable && (
         <Card className="border-dashed">
-          <CardContent className="pt-6">
+          <CardContent className="pt-6 space-y-2">
             <p className="text-sm text-muted-foreground">
-              <code className="text-xs bg-muted px-1 py-0.5 rounded">vcgencmd</code> isn&apos;t available on this
-              system, so under-voltage/throttling, core voltage, and clock speed can&apos;t be read. These
-              diagnostics only work when running directly on a Raspberry Pi.
+              <code className="text-xs bg-muted px-1 py-0.5 rounded">vcgencmd</code> calls are failing, so
+              under-voltage/throttling, core voltage, and clock speed can&apos;t be read.
             </p>
+            {uniqueErrors.length > 0 && (
+              <pre className="text-xs bg-muted rounded p-2 overflow-x-auto whitespace-pre-wrap">
+                {uniqueErrors.join('\n')}
+              </pre>
+            )}
+            {looksLikePermissionIssue && (
+              <p className="text-xs text-muted-foreground">
+                This looks like a permissions issue — the user running the Next.js process (via PM2) likely
+                isn&apos;t in the <code className="bg-muted px-1 rounded">video</code> group, which
+                <code className="bg-muted px-1 rounded">vcgencmd</code> needs to talk to the VideoCore chip. Try:{' '}
+                <code className="bg-muted px-1 rounded">sudo usermod -aG video $USER</code>, then log out/in (or
+                reboot) and restart PM2.
+              </p>
+            )}
           </CardContent>
         </Card>
       )}
