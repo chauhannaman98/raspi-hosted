@@ -1,7 +1,14 @@
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
-import { ArrowDown, ArrowUp, Wifi } from 'lucide-react';
+import {
+  ArrowDown,
+  ArrowUp,
+  Wifi,
+  Cable,
+  CircleCheck,
+  CircleX
+} from 'lucide-react';
 
 function formatBytesPerSec(bytesPerSec) {
   if (bytesPerSec == null || Number.isNaN(bytesPerSec)) return 'N/A';
@@ -51,6 +58,7 @@ function ThroughputChart({ data }) {
 }
 
 export default function NetworkTab({ interfaces, history }) {
+  console.log(history);
   const hasInterfaces = interfaces && interfaces.length > 0;
 
   return (
@@ -77,50 +85,150 @@ export default function NetworkTab({ interfaces, history }) {
       )}
 
       <div className="grid gap-6 md:grid-cols-2">
-        {interfaces.map((iface) => (
-          <Card key={iface.name}>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">{iface.name}</CardTitle>
-              <div className="flex gap-2">
-                {iface.addresses.map((addr) => (
-                  <Badge key={addr.address} variant="outline" className="text-xs font-mono">
-                    {addr.address}
+        {interfaces.map((iface) => {
+          const isWifi = iface.type === 'wifi';
+
+          return (
+            <Card key={iface.name}>
+              <CardHeader>
+                <div className="flex items-start justify-between">
+                  <div className="flex items-center gap-3">
+                    {isWifi ? (
+                      <Wifi className="w-5 h-5" />
+                    ) : (
+                      <Cable className="w-5 h-5" />
+                    )}
+
+                    <div>
+                      <CardTitle className="text-base">
+                        {isWifi ? 'Wi-Fi' : 'Ethernet'}
+                      </CardTitle>
+
+                      <CardDescription className="font-mono">
+                        {iface.name}
+                      </CardDescription>
+                    </div>
+                  </div>
+
+                  <Badge
+                    variant={iface.connected ? 'default' : 'outline'}
+                    className="flex items-center gap-1"
+                  >
+                    {iface.connected ? (
+                      <>
+                        <CircleCheck className="w-3 h-3" />
+                        Connected
+                      </>
+                    ) : (
+                      <>
+                        <CircleX className="w-3 h-3" />
+                        Disconnected
+                      </>
+                    )}
                   </Badge>
-                ))}
-              </div>
-            </CardHeader>
-            <CardContent>
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <div className="flex items-center gap-1 text-xs text-muted-foreground">
-                    <ArrowDown className="w-3 h-3 text-blue-500" />
-                    Download
-                  </div>
-                  <p className="text-lg font-semibold">{formatBytesPerSec(iface.rxRate)}</p>
-                  <p className="text-xs text-muted-foreground">
-                    {formatBytesTotal(iface.rxBytes)} total · {iface.rxPackets ?? 0} pkts
-                    {iface.rxErrors > 0 || iface.rxDropped > 0
-                      ? ` · ${iface.rxErrors ?? 0} err / ${iface.rxDropped ?? 0} drop`
-                      : ''}
-                  </p>
                 </div>
-                <div>
-                  <div className="flex items-center gap-1 text-xs text-muted-foreground">
-                    <ArrowUp className="w-3 h-3 text-purple-500" />
-                    Upload
+              </CardHeader>
+
+              <CardContent>
+                <div className="space-y-4">
+
+                  {/* Connection name */}
+                  {isWifi && iface.connectionName && (
+                    <div>
+                      <p className="text-xs text-muted-foreground">
+                        Network
+                      </p>
+                      <p className="text-lg font-semibold">
+                        {iface.connectionName}
+                      </p>
+                    </div>
+                  )}
+
+                  {/* Ethernet speed */}
+                  {!isWifi && iface.linkSpeedMbps && (
+                    <div>
+                      <p className="text-xs text-muted-foreground">
+                        Link Speed
+                      </p>
+                      <p className="text-lg font-semibold">
+                        {iface.linkSpeedMbps} Mbps
+                      </p>
+                    </div>
+                  )}
+
+                  {/* IP addresses */}
+                  <div>
+                    <p className="text-xs text-muted-foreground mb-1">
+                      IP Address
+                    </p>
+
+                    {iface.addresses?.length > 0 ? (
+                      <div className="flex flex-wrap gap-2">
+                        {iface.addresses.map((addr) => (
+                          <Badge
+                            key={addr.address}
+                            variant="outline"
+                            className="font-mono text-xs"
+                          >
+                            {addr.family}: {addr.address}
+                          </Badge>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="text-sm text-muted-foreground">
+                        No IP address
+                      </p>
+                    )}
                   </div>
-                  <p className="text-lg font-semibold">{formatBytesPerSec(iface.txRate)}</p>
-                  <p className="text-xs text-muted-foreground">
-                    {formatBytesTotal(iface.txBytes)} total · {iface.txPackets ?? 0} pkts
-                    {iface.txErrors > 0 || iface.txDropped > 0
-                      ? ` · ${iface.txErrors ?? 0} err / ${iface.txDropped ?? 0} drop`
-                      : ''}
-                  </p>
+
+                  {/* Traffic */}
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <div className="flex items-center gap-1 text-xs text-muted-foreground">
+                        <ArrowDown className="w-3 h-3" />
+                        Download
+                      </div>
+
+                      <p className="text-lg font-semibold">
+                        {formatBytesPerSec(iface.rxRate)}
+                      </p>
+
+                      <p className="text-xs text-muted-foreground">
+                        {formatBytesTotal(iface.rxBytes)} total ·{' '}
+                        {iface.rxPackets ?? 0} pkts
+
+                        {iface.rxErrors > 0 || iface.rxDropped > 0
+                          ? ` · ${iface.rxErrors ?? 0} err / ${iface.rxDropped ?? 0} drop`
+                          : ''}
+                      </p>
+                    </div>
+
+                    <div>
+                      <div className="flex items-center gap-1 text-xs text-muted-foreground">
+                        <ArrowUp className="w-3 h-3" />
+                        Upload
+                      </div>
+
+                      <p className="text-lg font-semibold">
+                        {formatBytesPerSec(iface.txRate)}
+                      </p>
+
+                      <p className="text-xs text-muted-foreground">
+                        {formatBytesTotal(iface.txBytes)} total ·{' '}
+                        {iface.txPackets ?? 0} pkts
+
+                        {iface.txErrors > 0 || iface.txDropped > 0
+                          ? ` · ${iface.txErrors ?? 0} err / ${iface.txDropped ?? 0} drop`
+                          : ''}
+                      </p>
+                    </div>
+                  </div>
+
                 </div>
-              </div>
-            </CardContent>
-          </Card>
-        ))}
+              </CardContent>
+            </Card>
+          );
+        })}
       </div>
     </div>
   );

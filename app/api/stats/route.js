@@ -99,6 +99,79 @@ async function getPM2Processes() {
   }
 }
 
+async function getInterfaceConnectionInfo(interfaceName) {
+  const info = {
+    type: interfaceName.startsWith('wl') ? 'wifi' : 'ethernet',
+    connectionName: null,
+    connected: false,
+    linkSpeedMbps: null
+  };
+
+  try {
+    const { stdout } = await execPromise(
+      `cat /sys/class/net/${interfaceName}/operstate`
+    );
+
+    info.connected = stdout.trim() === 'up';
+  } catch (error) {
+    // Keep defaults if interface state cannot be read.
+  }
+
+  // Wi-Fi information
+  if (info.type === 'wifi') {
+    try {
+      const { stdout } = await execPromise(
+        `iw dev ${interfaceName} link`
+      );
+
+      const match = stdout.match(/SSID:\s*(.+)/);
+      if (match) {
+        info.connectionName = match[1].trim();
+      }
+
+      // If iw reports "Not connected", make sure connected is false.
+      if (stdout.includes('Not connected')) {
+        info.connected = false;
+      }
+    } catch (error) {
+      // Fall back to iwgetid if `iw` isn't available.
+      try {
+        const { stdout } = await execPromise(
+          `iwgetid ${interfaceName} -r`
+        );
+
+        const ssid = stdout.trim();
+
+        if (ssid) {
+          info.connectionName = ssid;
+          info.connected = true;
+        }
+      } catch (fallbackError) {
+        // Wi-Fi SSID unavailable.
+      }
+    }
+  }
+
+  // Ethernet link speed
+  if (info.type === 'ethernet' && info.connected) {
+    try {
+      const { stdout } = await execPromise(
+        `cat /sys/class/net/${interfaceName}/speed`
+      );
+
+      const speed = parseInt(stdout.trim(), 10);
+
+      if (!Number.isNaN(speed) && speed > 0) {
+        info.linkSpeedMbps = speed;
+      }
+    } catch (error) {
+      // Link speed unavailable.
+    }
+  }
+
+  return info;
+}
+
 // Reads cumulative per-interface counters from /proc/net/dev and pairs them with
 // the IP addresses Node already knows about via os.networkInterfaces(). Counters
 // are cumulative since boot — the client computes throughput (bytes/sec) itself
@@ -108,16 +181,14 @@ async function getNetworkStats() {
     const { stdout } = await execPromise('cat /proc/net/dev');
     const osInterfaces = os.networkInterfaces();
 
-    const lines = stdout.trim().split('\n').slice(2); // drop the two header lines
-    return lines
+    const lines = stdout.trim().split('\n').slice(2);
+
+    const interfaces = lines
       .map((line) => {
         const [ifaceRaw, statsRaw] = line.split(':');
         const name = ifaceRaw.trim();
         const fields = statsRaw.trim().split(/\s+/).map(Number);
 
-        // /proc/net/dev columns (in order):
-        // rx: bytes packets errs drop fifo frame compressed multicast
-        // tx: bytes packets errs drop fifo colls carrier compressed
         const [
           rxBytes, rxPackets, rxErrors, rxDropped, , , , ,
           txBytes, txPackets, txErrors, txDropped
@@ -125,7 +196,10 @@ async function getNetworkStats() {
 
         const addresses = (osInterfaces[name] || [])
           .filter((addr) => !addr.internal)
-          .map((addr) => ({ family: addr.family, address: addr.address }));
+          .map((addr) => ({
+            family: addr.family,
+            address: addr.address
+          }));
 
         return {
           name,
@@ -141,6 +215,20 @@ async function getNetworkStats() {
         };
       })
       .filter((iface) => iface.name !== 'lo');
+
+    // Collect connection-specific information in parallel.
+    const enrichedInterfaces = await Promise.all(
+      interfaces.map(async (iface) => {
+        const connectionInfo = await getInterfaceConnectionInfo(iface.name);
+
+        return {
+          ...iface,
+          ...connectionInfo
+        };
+      })
+    );
+
+    return enrichedInterfaces;
   } catch (error) {
     return [];
   }
