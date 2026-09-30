@@ -310,6 +310,8 @@ export async function GET() {
       pm2Processes,
       cloudflaredStatus,
       webhookStatus,
+      mqttStatus,
+      noderedStatus,
       network
     ] = await Promise.all([
       getCPUTemperature(),
@@ -352,7 +354,9 @@ export async function GET() {
       services: {
         systemd: [
           { name: 'cloudflared', label: 'Cloudflare Tunnel', status: cloudflaredStatus },
-          { name: 'webhook', label: 'GitHub Webhook Listener', status: webhookStatus }
+          { name: 'webhook', label: 'GitHub Webhook Listener', status: webhookStatus },
+          { name: 'mqtt', label: 'MQTT', status: mqttStatus },
+          { name: 'nodered', label: 'GitHub Webhook Listener', status: noderedStatus }
         ],
         pm2: pm2Processes
       }
