@@ -320,6 +320,8 @@ export async function GET() {
       getPM2Processes(),
       getSystemdServiceStatus('cloudflared'),
       getSystemdServiceStatus('webhook'),
+      getSystemdServiceStatus('mqtt'),
+      getSystemdServiceStatus('nodered'),
       getNetworkStats()
     ]);
 
