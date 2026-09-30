@@ -322,7 +322,7 @@ export async function GET() {
       getPM2Processes(),
       getSystemdServiceStatus('cloudflared'),
       getSystemdServiceStatus('webhook'),
-      getSystemdServiceStatus('mqtt'),
+      getSystemdServiceStatus('mosquitto'),
       getSystemdServiceStatus('nodered'),
       getNetworkStats()
     ]);
@@ -356,7 +356,7 @@ export async function GET() {
           { name: 'cloudflared', label: 'Cloudflare Tunnel', status: cloudflaredStatus },
           { name: 'webhook', label: 'GitHub Webhook Listener', status: webhookStatus },
           { name: 'mqtt', label: 'MQTT', status: mqttStatus },
-          { name: 'nodered', label: 'GitHub Webhook Listener', status: noderedStatus }
+          { name: 'nodered', label: 'Node-Red', status: noderedStatus }
         ],
         pm2: pm2Processes
       }
